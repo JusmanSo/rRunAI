@@ -20,7 +20,8 @@
  *   the runner is supposed to be jogging easy during a recovery.
  *
  * HOW PACE IS EVALUATED:
- *   Pace = elapsed minutes ÷ distance in km.
+ *   We compare the latest smoothed rolling pace (min/km) to the
+ *   target range for the current workout block.
  *   A *lower* pace number means the runner is *faster*.
  */
 
@@ -29,8 +30,6 @@ import { useState, useEffect, useRef } from "react";
 // ─── Configuration ───────────────────────────────────────────────────────────
 
 const EVAL_INTERVAL_SECONDS = 8;
-const MIN_DISTANCE_KM = 0.05;
-
 // ─── Types ───────────────────────────────────────────────────────────────────
 
 export type CoachingState = "too_fast" | "too_slow" | "on_target" | null;
@@ -51,8 +50,8 @@ const COACHING_MESSAGES: Record<NonNullable<CoachingState>, string> = {
 // ─── The Hook ────────────────────────────────────────────────────────────────
 
 /**
- * @param elapsedSeconds  Current elapsed time of the run.
- * @param distanceKm      Current total distance from GPS.
+ * @param elapsedSeconds    Current elapsed time of the run.
+ * @param currentPaceMinPerKm  Current rolling pace from GPS.
  * @param targetMinPace   Fastest acceptable pace (min/km), or null/undefined
  *                        if the current block has no pace target.
  * @param targetMaxPace   Slowest acceptable pace (min/km), or null/undefined
@@ -61,7 +60,7 @@ const COACHING_MESSAGES: Record<NonNullable<CoachingState>, string> = {
  */
 export default function useCoaching(
   elapsedSeconds: number,
-  distanceKm: number,
+  currentPaceMinPerKm: number | null,
   targetMinPace: number | null | undefined,
   targetMaxPace: number | null | undefined
 ): CoachingFeedback {
@@ -86,21 +85,17 @@ export default function useCoaching(
     }
     lastEvalTime.current = elapsedSeconds;
 
-    // ── Guard: not enough distance yet ───────────────────────────────
-    if (distanceKm < MIN_DISTANCE_KM) {
+    // ── Guard: no reliable current pace yet ──────────────────────────
+    if (currentPaceMinPerKm == null) {
       return;
     }
-
-    // ── Calculate current average pace ───────────────────────────────
-    const elapsedMinutes = elapsedSeconds / 60;
-    const paceMinPerKm = elapsedMinutes / distanceKm;
 
     // ── Compare pace to the BLOCK's target window ────────────────────
     let newState: CoachingState;
 
-    if (paceMinPerKm < targetMinPace) {
+    if (currentPaceMinPerKm < targetMinPace) {
       newState = "too_fast";
-    } else if (paceMinPerKm > targetMaxPace) {
+    } else if (currentPaceMinPerKm > targetMaxPace) {
       newState = "too_slow";
     } else {
       newState = "on_target";
@@ -109,7 +104,13 @@ export default function useCoaching(
     if (newState !== currentState) {
       setCurrentState(newState);
     }
-  }, [elapsedSeconds, distanceKm, targetMinPace, targetMaxPace, currentState]);
+  }, [
+    elapsedSeconds,
+    currentPaceMinPerKm,
+    targetMinPace,
+    targetMaxPace,
+    currentState,
+  ]);
 
   return {
     message: currentState ? COACHING_MESSAGES[currentState] : null,

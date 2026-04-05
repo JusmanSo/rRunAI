@@ -20,6 +20,31 @@ export function formatTime(totalSeconds: number): string {
 }
 
 /**
+ * Formats a numeric pace value (minutes per kilometre) as MM:SS.
+ *
+ * Returns "--:--" when pace is unknown or clearly invalid.
+ */
+export function formatMinPerKm(paceMinPerKm: number | null | undefined): string {
+  if (
+    paceMinPerKm == null ||
+    !Number.isFinite(paceMinPerKm) ||
+    paceMinPerKm <= 0 ||
+    paceMinPerKm > 30
+  ) {
+    return "--:--";
+  }
+
+  const wholeMins = Math.floor(paceMinPerKm);
+  const rawSecs = Math.round((paceMinPerKm - wholeMins) * 60);
+
+  // Handle values like 5.999 that round up to the next minute cleanly.
+  const displayMins = rawSecs === 60 ? wholeMins + 1 : wholeMins;
+  const displaySecs = rawSecs === 60 ? 0 : rawSecs;
+
+  return `${String(displayMins).padStart(2, "0")}:${String(displaySecs).padStart(2, "0")}`;
+}
+
+/**
  * Calculates average pace (minutes per kilometre) from elapsed time and
  * distance, then returns it as a MM:SS string.
  *
@@ -49,8 +74,5 @@ export function formatPace(elapsedSeconds: number, distanceKm: number): string {
     return "--:--";
   }
 
-  const wholeMins = Math.floor(paceMinPerKm);
-  const remainingSecs = Math.round((paceMinPerKm - wholeMins) * 60);
-
-  return `${String(wholeMins).padStart(2, "0")}:${String(remainingSecs).padStart(2, "0")}`;
+  return formatMinPerKm(paceMinPerKm);
 }

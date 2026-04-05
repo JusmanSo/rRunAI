@@ -20,6 +20,7 @@
     },
     "android": {
       "permissions": [
+        "ACCESS_FINE_LOCATION",
         "ACCESS_FINE_LOCATION"
       ],
       "adaptiveIcon": {
@@ -28,7 +29,8 @@
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "package": "com.jusmanso.rrunai"
     },
     "web": {
       "favicon": "./assets/favicon.png"

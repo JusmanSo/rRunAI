@@ -62,7 +62,7 @@ import useWorkoutBlocks from "../hooks/useWorkoutBlocks";
 import useBlockTransitionVoice from "../hooks/useBlockTransitionVoice";
 
 // Shared formatting helpers
-import { formatTime, formatPace } from "../utils/formatters";
+import { formatTime, formatMinPerKm } from "../utils/formatters";
 
 // Types
 import type { CoachingState } from "../hooks/useCoaching";
@@ -98,7 +98,7 @@ export default function RunScreen({ route, navigation }: Props) {
   }, []);
 
   // ── GPS tracking ──────────────────────────────────────────────────────
-  const { distanceKm, isTracking, errorMsg } = useLocation();
+  const { distanceKm, currentPaceMinPerKm, isTracking, errorMsg } = useLocation();
 
   // ── Workout block engine ──────────────────────────────────────────────
   const {
@@ -113,7 +113,7 @@ export default function RunScreen({ route, navigation }: Props) {
   // ── Coaching engine ───────────────────────────────────────────────────
   const { message: coachingMessage, state: coachingState } = useCoaching(
     elapsedSeconds,
-    distanceKm,
+    currentPaceMinPerKm,
     activeBlock.targetMinPace,
     activeBlock.targetMaxPace
   );
@@ -256,7 +256,7 @@ export default function RunScreen({ route, navigation }: Props) {
       <View style={styles.metricsRow}>
         <MetricBlock
           label="Pace"
-          value={formatPace(elapsedSeconds, distanceKm)}
+          value={formatMinPerKm(currentPaceMinPerKm)}
           unit="/km"
         />
         <MetricBlock
