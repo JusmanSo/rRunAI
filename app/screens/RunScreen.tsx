@@ -99,6 +99,11 @@ export default function RunScreen({ route, navigation }: Props) {
 
   // ── GPS tracking ──────────────────────────────────────────────────────
   const { distanceKm, currentPaceMinPerKm, isTracking, errorMsg } = useLocation();
+  const livePaceLabel =
+    currentPaceMinPerKm == null
+      ? "Calibrating GPS"
+      : formatMinPerKm(currentPaceMinPerKm);
+  const livePaceUnit = currentPaceMinPerKm == null ? "" : "/km";
 
   // ── Workout block engine ──────────────────────────────────────────────
   const {
@@ -256,8 +261,8 @@ export default function RunScreen({ route, navigation }: Props) {
       <View style={styles.metricsRow}>
         <MetricBlock
           label="Pace"
-          value={formatMinPerKm(currentPaceMinPerKm)}
-          unit="/km"
+          value={livePaceLabel}
+          unit={livePaceUnit}
         />
         <MetricBlock
           label="Distance"
@@ -430,10 +435,12 @@ function MetricBlock({
   value: string;
   unit: string;
 }) {
+  const isLongValue = value.length > 8;
+
   return (
     <View style={styles.metricBlock}>
       <Text style={styles.metricLabel}>{label}</Text>
-      <Text style={styles.metricValue}>
+      <Text style={[styles.metricValue, isLongValue && styles.metricValueLong]}>
         {value}
         <Text style={styles.metricUnit}> {unit}</Text>
       </Text>
@@ -554,6 +561,10 @@ const styles = StyleSheet.create({
     fontSize: 28,
     fontWeight: "700",
     color: "#FFFFFF",
+  },
+  metricValueLong: {
+    fontSize: 20,
+    textAlign: "center",
   },
   metricUnit: {
     fontSize: 14,
