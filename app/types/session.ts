@@ -87,8 +87,8 @@ export interface Session {
    * Session-level target pace window (min/km).
    * Still used as a fallback and for the HomeScreen card display.
    */
-  targetMinPace: number;
-  targetMaxPace: number;
+  targetMinPace?: number;
+  targetMaxPace?: number;
 
   /**
    * The ordered list of workout blocks that make up this session.
@@ -206,6 +206,13 @@ export const SESSION_CATALOGUE: Session[] = [
     targetMinPace: 4.33,
     targetMaxPace: 4.58,
     blocks: INTERVAL_RUN_BLOCKS,
+  },
+  {
+    id: "free_run",
+    name: "Free Run",
+    description: "Open-ended GPS test run",
+    durationLabel: "Open",
+    blocks: [],
   },
 ];
 

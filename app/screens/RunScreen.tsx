@@ -60,6 +60,7 @@ import useCoaching from "../hooks/useCoaching";
 import useVoiceCoach from "../hooks/useVoiceCoach";
 import useWorkoutBlocks from "../hooks/useWorkoutBlocks";
 import useBlockTransitionVoice from "../hooks/useBlockTransitionVoice";
+import { getRunLocationDiagnostics } from "../services/runLocationTracking";
 
 // Shared formatting helpers
 import { formatTime, formatMinPerKm } from "../utils/formatters";
@@ -79,7 +80,15 @@ type Props = NativeStackScreenProps<RootStackParamList, "Run">;
  */
 const AUTO_NAV_DELAY_MS = 3000;
 
-export default function RunScreen({ route, navigation }: Props) {
+export default function RunScreen(props: Props) {
+  if (props.route.params.session.id === "free_run") {
+    return <FreeRunScreen {...props} />;
+  }
+
+  return <StructuredRunScreen {...props} />;
+}
+
+function StructuredRunScreen({ route, navigation }: Props) {
   // ── Read the session from navigation params ────────────────────────────
   const { session } = route.params;
 
@@ -98,7 +107,14 @@ export default function RunScreen({ route, navigation }: Props) {
   }, []);
 
   // ── GPS tracking ──────────────────────────────────────────────────────
-  const { distanceKm, currentPaceMinPerKm, isTracking, errorMsg } = useLocation();
+  const {
+    distanceKm,
+    currentPaceMinPerKm,
+    isTracking,
+    errorMsg,
+    backgroundErrorMsg,
+    stopTracking,
+  } = useLocation();
   const livePaceLabel =
     currentPaceMinPerKm == null
       ? "Calibrating GPS"
@@ -165,6 +181,7 @@ export default function RunScreen({ route, navigation }: Props) {
       clearInterval(intervalRef.current);
       intervalRef.current = null;
     }
+    stopTracking();
 
     // ── Speak the final completion cue ─────────────────────────────
     // We stop any ongoing speech first so the completion cue is
@@ -186,6 +203,7 @@ export default function RunScreen({ route, navigation }: Props) {
     // at the moment of completion.
     const finalElapsed = elapsedSeconds;
     const finalDistance = distanceKm;
+    const finalDiagnostics = getRunLocationDiagnostics();
 
     autoNavTimer.current = setTimeout(() => {
       autoNavTimer.current = null;
@@ -193,6 +211,7 @@ export default function RunScreen({ route, navigation }: Props) {
         elapsedSeconds: finalElapsed,
         distanceKm: finalDistance,
         session,
+        diagnostics: finalDiagnostics,
       });
     }, AUTO_NAV_DELAY_MS);
 
@@ -223,6 +242,8 @@ export default function RunScreen({ route, navigation }: Props) {
       clearTimeout(autoNavTimer.current);
       autoNavTimer.current = null;
     }
+    stopTracking();
+    const finalDiagnostics = getRunLocationDiagnostics();
 
     try {
       Speech.stop();
@@ -230,7 +251,12 @@ export default function RunScreen({ route, navigation }: Props) {
       // Silent failure.
     }
 
-    navigation.navigate("Summary", { elapsedSeconds, distanceKm, session });
+    navigation.navigate("Summary", {
+      elapsedSeconds,
+      distanceKm,
+      session,
+      diagnostics: finalDiagnostics,
+    });
   };
 
   return (
@@ -243,7 +269,7 @@ export default function RunScreen({ route, navigation }: Props) {
         {errorMsg
           ? `⚠ ${errorMsg}`
           : isTracking
-            ? "GPS Active"
+            ? backgroundErrorMsg ?? "GPS Active"
             : "Starting GPS…"}
       </Text>
 
@@ -283,6 +309,97 @@ export default function RunScreen({ route, navigation }: Props) {
       />
 
       {/* End Run button */}
+      <TouchableOpacity
+        style={styles.endButton}
+        onPress={handleEndRun}
+        activeOpacity={0.8}
+      >
+        <Text style={styles.endButtonText}>End Run</Text>
+      </TouchableOpacity>
+    </View>
+  );
+}
+
+function FreeRunScreen({ route, navigation }: Props) {
+  const { session } = route.params;
+
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  useEffect(() => {
+    intervalRef.current = setInterval(() => {
+      setElapsedSeconds((prev) => prev + 1);
+    }, 1000);
+
+    return () => {
+      if (intervalRef.current) clearInterval(intervalRef.current);
+    };
+  }, []);
+
+  const {
+    distanceKm,
+    currentPaceMinPerKm,
+    isTracking,
+    errorMsg,
+    backgroundErrorMsg,
+    stopTracking,
+  } = useLocation();
+  const livePaceLabel =
+    currentPaceMinPerKm == null
+      ? "Calibrating GPS"
+      : formatMinPerKm(currentPaceMinPerKm);
+  const livePaceUnit = currentPaceMinPerKm == null ? "" : "/km";
+
+  const handleEndRun = () => {
+    if (intervalRef.current) {
+      clearInterval(intervalRef.current);
+      intervalRef.current = null;
+    }
+    stopTracking();
+    const finalDiagnostics = getRunLocationDiagnostics();
+
+    try {
+      Speech.stop();
+    } catch {
+      // Silent failure.
+    }
+
+    navigation.navigate("Summary", {
+      elapsedSeconds,
+      distanceKm,
+      session,
+      diagnostics: finalDiagnostics,
+    });
+  };
+
+  return (
+    <View style={styles.container}>
+      <Text style={styles.sessionBadge}>{session.name}</Text>
+
+      <Text style={styles.status}>
+        {errorMsg
+          ? `⚠ ${errorMsg}`
+          : isTracking
+            ? backgroundErrorMsg ?? "GPS Active"
+            : "Starting GPS…"}
+      </Text>
+
+      <View style={styles.metricsRow}>
+        <MetricBlock
+          label="Pace"
+          value={livePaceLabel}
+          unit={livePaceUnit}
+        />
+        <MetricBlock
+          label="Distance"
+          value={distanceKm.toFixed(2)}
+          unit="km"
+        />
+      </View>
+
+      <Text style={styles.timer}>{formatTime(elapsedSeconds)}</Text>
+      <Text style={styles.timerLabel}>Elapsed Time</Text>
+
       <TouchableOpacity
         style={styles.endButton}
         onPress={handleEndRun}

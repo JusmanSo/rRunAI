@@ -14,7 +14,12 @@
     "ios": {
       "supportsTablet": true,
       "infoPlist": {
-        "NSLocationWhenInUseUsageDescription": "rRunAI needs your location to track your run distance and pace in real time."
+        "NSLocationWhenInUseUsageDescription": "rRunAI needs your location to track your run distance and pace in real time.",
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "rRunAI needs background location to keep tracking distance and pace during an active run when the screen is locked.",
+        "NSLocationAlwaysUsageDescription": "rRunAI needs background location to keep tracking distance and pace during an active run when the screen is locked.",
+        "UIBackgroundModes": [
+          "location"
+        ]
       },
       "bundleIdentifier": "com.jusmanso.rrunai"
     },
@@ -39,9 +44,16 @@
       [
         "expo-build-properties",
         {
-          "ios": {
-            "buildReactNativeFromSource": true
-          }
+          "ios": {}
+        }
+      ],
+      [
+        "expo-location",
+        {
+          "isIosBackgroundLocationEnabled": true,
+          "locationWhenInUsePermission": "rRunAI needs your location to track your run distance and pace in real time.",
+          "locationAlwaysAndWhenInUsePermission": "rRunAI needs background location to keep tracking distance and pace during an active run when the screen is locked.",
+          "locationAlwaysPermission": "rRunAI needs background location to keep tracking distance and pace during an active run when the screen is locked."
         }
       ],
       "./plugins/ios/withFmtFix"

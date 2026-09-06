@@ -31,6 +31,7 @@ import {
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import type { RootStackParamList } from "../navigation/AppNavigator";
 import type { BlockType } from "../types/session";
+import type { RunLocationDiagnostics } from "../services/runGpsDiagnostics";
 
 // Shared formatting helpers
 import { formatTime, formatPace } from "../utils/formatters";
@@ -38,7 +39,8 @@ import { formatTime, formatPace } from "../utils/formatters";
 type Props = NativeStackScreenProps<RootStackParamList, "Summary">;
 
 export default function SummaryScreen({ route, navigation }: Props) {
-  const { elapsedSeconds, distanceKm, session } = route.params;
+  const { elapsedSeconds, distanceKm, session, diagnostics } = route.params;
+  const isStructuredWorkout = session.blocks.length > 0;
 
   // ── Calculate the total planned duration from all blocks ────────────
   // This lets the runner see if they ran the full plan or ended early.
@@ -61,10 +63,12 @@ export default function SummaryScreen({ route, navigation }: Props) {
         <Text style={styles.sectionTitle}>Run Summary</Text>
 
         <SummaryRow label="Duration" value={formatTime(elapsedSeconds)} />
-        <SummaryRow
-          label="Planned Duration"
-          value={formatTime(plannedDurationSec)}
-        />
+        {isStructuredWorkout && (
+          <SummaryRow
+            label="Planned Duration"
+            value={formatTime(plannedDurationSec)}
+          />
+        )}
         <SummaryRow label="Distance" value={`${distanceKm.toFixed(2)} km`} />
         <SummaryRow
           label="Avg Pace"
@@ -74,34 +78,40 @@ export default function SummaryScreen({ route, navigation }: Props) {
       </View>
 
       {/* ── Completed Blocks card ───────────────────────────────────── */}
-      <View style={styles.card}>
-        <Text style={styles.sectionTitle}>Completed Blocks</Text>
-        {session.blocks.map((block, index) => {
-          const dotColor = BLOCK_TYPE_COLORS[block.type];
-          const mins = Math.floor(block.durationSec / 60);
-          const secs = block.durationSec % 60;
-          const durationStr =
-            secs > 0 ? `${mins}m ${secs}s` : `${mins} min`;
-          const isLast = index === session.blocks.length - 1;
+      {isStructuredWorkout && (
+        <View style={styles.card}>
+          <Text style={styles.sectionTitle}>Completed Blocks</Text>
+          {session.blocks.map((block, index) => {
+            const dotColor = BLOCK_TYPE_COLORS[block.type];
+            const mins = Math.floor(block.durationSec / 60);
+            const secs = block.durationSec % 60;
+            const durationStr =
+              secs > 0 ? `${mins}m ${secs}s` : `${mins} min`;
+            const isLast = index === session.blocks.length - 1;
 
-          return (
-            <View
-              key={index}
-              style={[styles.blockRow, isLast && styles.blockRowLast]}
-            >
-              <View style={styles.blockRowLeft}>
-                {/* Small index number */}
-                <Text style={styles.blockIndex}>{index + 1}</Text>
-                <View
-                  style={[styles.blockDot, { backgroundColor: dotColor }]}
-                />
-                <Text style={styles.blockName}>{block.label}</Text>
+            return (
+              <View
+                key={index}
+                style={[styles.blockRow, isLast && styles.blockRowLast]}
+              >
+                <View style={styles.blockRowLeft}>
+                  {/* Small index number */}
+                  <Text style={styles.blockIndex}>{index + 1}</Text>
+                  <View
+                    style={[styles.blockDot, { backgroundColor: dotColor }]}
+                  />
+                  <Text style={styles.blockName}>{block.label}</Text>
+                </View>
+                <Text style={styles.blockDuration}>{durationStr}</Text>
               </View>
-              <Text style={styles.blockDuration}>{durationStr}</Text>
-            </View>
-          );
-        })}
-      </View>
+            );
+          })}
+        </View>
+      )}
+
+      {diagnostics && (
+        <GpsDiagnosticsSection diagnostics={diagnostics} />
+      )}
 
       {/* ── RPE placeholder ─────────────────────────────────────────── */}
       <View style={styles.rpeSection}>
@@ -119,6 +129,90 @@ export default function SummaryScreen({ route, navigation }: Props) {
       </TouchableOpacity>
     </ScrollView>
   );
+}
+
+function GpsDiagnosticsSection({
+  diagnostics,
+}: {
+  diagnostics: RunLocationDiagnostics;
+}) {
+  const rejectionReasonText = [
+    `accuracy: ${diagnostics.rejectionReasons.accuracy}`,
+    `spike: ${diagnostics.rejectionReasons.spike}`,
+    `duplicate: ${diagnostics.rejectionReasons.duplicate}`,
+    `gap reset: ${diagnostics.rejectionReasons.gapReset}`,
+  ].join(", ");
+
+  return (
+    <View style={styles.debugCard}>
+      <Text style={styles.sectionTitle}>GPS Debug</Text>
+      <SummaryRow
+        label="Latest Accuracy"
+        value={formatAccuracy(diagnostics.latestAccuracyMetres)}
+      />
+      <SummaryRow
+        label="Latest Sample"
+        value={formatSampleTimestamp(diagnostics.latestSampleTimestamp)}
+      />
+      <SummaryRow
+        label="Accepted Samples"
+        value={String(diagnostics.acceptedSampleCount)}
+      />
+      <SummaryRow
+        label="Rejected Samples"
+        value={String(diagnostics.rejectedSampleCount)}
+      />
+      <SummaryRow label="Reject Reasons" value={rejectionReasonText} />
+      <SummaryRow
+        label="Foreground Samples"
+        value={String(diagnostics.foregroundSampleCount)}
+      />
+      <SummaryRow
+        label="Background Samples"
+        value={String(diagnostics.backgroundSampleCount)}
+      />
+      <SummaryRow
+        label="Inactive Source Ignored"
+        value={String(diagnostics.inactiveSourceIgnoredSampleCount)}
+      />
+      <SummaryRow
+        label="Pace Recalibrations"
+        value={String(diagnostics.paceReturnedToCalibratingCount)}
+      />
+      <SummaryRow
+        label="Background Time"
+        value={formatDurationMs(diagnostics.backgroundElapsedMs)}
+        isLast
+      />
+    </View>
+  );
+}
+
+function formatAccuracy(accuracyMetres: number | null): string {
+  if (accuracyMetres == null || !Number.isFinite(accuracyMetres)) {
+    return "Unknown";
+  }
+
+  return `${Math.round(accuracyMetres)} m`;
+}
+
+function formatSampleTimestamp(timestamp: number | null): string {
+  if (timestamp == null || !Number.isFinite(timestamp)) {
+    return "None";
+  }
+
+  const ageSeconds = Math.max(0, Math.round((Date.now() - timestamp) / 1000));
+  const time = new Date(timestamp).toLocaleTimeString([], {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  });
+
+  return `${time} (${ageSeconds}s ago)`;
+}
+
+function formatDurationMs(durationMs: number): string {
+  return formatTime(Math.round(durationMs / 1000));
 }
 
 // ─── Sub-components ──────────────────────────────────────────────────────────
@@ -186,6 +280,15 @@ const styles = StyleSheet.create({
     padding: 20,
     marginBottom: 20,
   },
+  debugCard: {
+    width: "100%",
+    backgroundColor: "#151515",
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#333333",
+    padding: 20,
+    marginBottom: 20,
+  },
   sectionTitle: {
     fontSize: 12,
     fontWeight: "600",
@@ -209,11 +312,15 @@ const styles = StyleSheet.create({
   rowLabel: {
     fontSize: 16,
     color: "#888888",
+    flex: 1,
+    paddingRight: 12,
   },
   rowValue: {
     fontSize: 16,
     fontWeight: "700",
     color: "#FFFFFF",
+    flex: 1,
+    textAlign: "right",
   },
 
   // ── Block breakdown ─────────────────────────────────────────────────

@@ -79,10 +79,15 @@ export default function HomeScreen({ navigation }: Props) {
           {selectedSession.name} — {selectedSession.durationLabel}
         </Text>
         <Text style={styles.cardHint}>{selectedSession.description}</Text>
-        <Text style={styles.cardPace}>
-          Target: {paceToString(selectedSession.targetMinPace)} –{" "}
-          {paceToString(selectedSession.targetMaxPace)} /km
-        </Text>
+        {selectedSession.targetMinPace != null &&
+        selectedSession.targetMaxPace != null ? (
+          <Text style={styles.cardPace}>
+            Target: {paceToString(selectedSession.targetMinPace)} –{" "}
+            {paceToString(selectedSession.targetMaxPace)} /km
+          </Text>
+        ) : (
+          <Text style={styles.cardPace}>No pace target</Text>
+        )}
       </View>
 
       {/* ── Start Run button ──────────────────────────────────────────── */}
@@ -118,6 +123,8 @@ const styles = StyleSheet.create({
   // ── Session picker pills (NEW) ──────────────────────────────────────
   pickerRow: {
     flexDirection: "row",
+    flexWrap: "wrap",
+    justifyContent: "center",
     marginBottom: 24,
     gap: 8,
   },

@@ -8,6 +8,7 @@ import SummaryScreen from "../screens/SummaryScreen";
 
 // Import the Session type so we can include it in navigation params.
 import type { Session } from "../types/session";
+import type { RunLocationDiagnostics } from "../services/runGpsDiagnostics";
 
 /**
  * Central type definition for all screens and their params.
@@ -21,7 +22,12 @@ import type { Session } from "../types/session";
 export type RootStackParamList = {
   Home: undefined;
   Run: { session: Session };
-  Summary: { elapsedSeconds: number; distanceKm: number; session: Session };
+  Summary: {
+    elapsedSeconds: number;
+    distanceKm: number;
+    session: Session;
+    diagnostics?: RunLocationDiagnostics;
+  };
 };
 
 const Stack = createNativeStackNavigator<RootStackParamList>();

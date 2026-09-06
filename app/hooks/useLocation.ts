@@ -8,23 +8,21 @@
  * walk/jog changes can come through within a few seconds.
  */
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { AppState, type AppStateStatus } from "react-native";
 import * as Location from "expo-location";
 import {
-  calculateInternalPaceMinPerKm,
-  getPaceWindowStats,
-  hasHighPaceConfidence,
-  isPaceCalibrated,
-  isSlowMovementSpeed,
-  updateDisplayPaceMinPerKm,
-  updatePaceBuffer,
-  smoothInternalPaceMinPerKm,
-  type PacePoint,
-} from "../utils/pace";
-
-// Keep the last stable display pace briefly when confidence dips so the
-// screen does not flicker between a pace value and "--:--".
-const DISPLAY_PACE_HOLD_MS = 4_000;
+  getRunLocationSnapshot,
+  processRunLocation,
+  recordRunEnteredBackground,
+  recordRunEnteredForeground,
+  resetRunLocationTracking,
+  setRunLocationAppState,
+  startRunBackgroundLocationUpdates,
+  stopRunBackgroundLocationUpdates,
+  subscribeRunLocation,
+} from "../services/runLocationTracking";
+import type { RunLocationDiagnostics } from "../services/runGpsDiagnostics";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -33,34 +31,104 @@ export interface LocationData {
   currentPaceMinPerKm: number | null;
   isTracking: boolean;
   errorMsg: string | null;
+  backgroundErrorMsg: string | null;
+  diagnostics: RunLocationDiagnostics;
+  stopTracking: () => void;
 }
 
 // ─── Hook ────────────────────────────────────────────────────────────────────
 
 export default function useLocation(): LocationData {
-  const [distanceKm, setDistanceKm] = useState(0);
+  const initialSnapshot = getRunLocationSnapshot();
+  const [distanceKm, setDistanceKm] = useState(initialSnapshot.distanceKm);
   const [currentPaceMinPerKm, setCurrentPaceMinPerKm] = useState<number | null>(
-    null
+    initialSnapshot.currentPaceMinPerKm
   );
+  const [diagnostics, setDiagnostics] = useState(initialSnapshot.diagnostics);
   const [isTracking, setIsTracking] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
-
-  const totalMetres = useRef(0);
-  const pacePoints = useRef<PacePoint[]>([]);
-  const acceptedSampleCount = useRef(0);
-  const firstAcceptedAt = useRef<number | null>(null);
-  const lastRejectedAt = useRef<number | null>(null);
-  const internalPace = useRef<number | null>(null);
-  const displayPace = useRef<number | null>(null);
-  const lastStableDisplayAt = useRef<number | null>(null);
+  const [backgroundErrorMsg, setBackgroundErrorMsg] = useState<string | null>(
+    null
+  );
 
   const subscriptionRef = useRef<Location.LocationSubscription | null>(null);
+  const appStateRef = useRef<AppStateStatus>(AppState.currentState);
+  const hasStoppedRef = useRef(false);
+
+  const setLocationAppState = useCallback((appState: AppStateStatus) => {
+    if (appState === "active") {
+      setRunLocationAppState("active");
+      return;
+    }
+
+    if (appState === "background") {
+      setRunLocationAppState("background");
+      return;
+    }
+
+    setRunLocationAppState("inactive");
+  }, []);
+
+  const stopTracking = useCallback(() => {
+    hasStoppedRef.current = true;
+
+    if (subscriptionRef.current) {
+      subscriptionRef.current.remove();
+      subscriptionRef.current = null;
+    }
+
+    setIsTracking(false);
+    recordRunEnteredForeground();
+
+    stopRunBackgroundLocationUpdates().catch(() => {
+      // The run is already ending; failure to unregister should not crash it.
+    });
+  }, []);
 
   useEffect(() => {
     let isMounted = true;
+    resetRunLocationTracking();
+    setLocationAppState(appStateRef.current);
+
+    const unsubscribe = subscribeRunLocation((snapshot) => {
+      if (!isMounted) return;
+
+      setDistanceKm(snapshot.distanceKm);
+      setCurrentPaceMinPerKm(snapshot.currentPaceMinPerKm);
+      setDiagnostics(snapshot.diagnostics);
+    });
+
+    const appStateSubscription = AppState.addEventListener(
+      "change",
+      (nextAppState) => {
+        const previousAppState = appStateRef.current;
+        appStateRef.current = nextAppState;
+        setLocationAppState(nextAppState);
+
+        if (previousAppState !== "background" && nextAppState === "background") {
+          recordRunEnteredBackground();
+          return;
+        }
+
+        if (previousAppState === "background" && nextAppState !== "background") {
+          recordRunEnteredForeground();
+        }
+      }
+    );
 
     async function startTracking() {
-      const { status } = await Location.requestForegroundPermissionsAsync();
+      let foregroundPermission;
+
+      try {
+        foregroundPermission = await Location.requestForegroundPermissionsAsync();
+      } catch {
+        if (isMounted) {
+          setErrorMsg("Location permission could not be requested.");
+        }
+        return;
+      }
+
+      const { status } = foregroundPermission;
 
       if (status !== "granted") {
         if (isMounted) {
@@ -69,110 +137,93 @@ export default function useLocation(): LocationData {
         return;
       }
 
-      const sub = await Location.watchPositionAsync(
-        {
-          accuracy: Location.Accuracy.High,
-          timeInterval: 1000,
-        },
-        (location) => {
-          const newPoint: PacePoint = {
-            latitude: location.coords.latitude,
-            longitude: location.coords.longitude,
-            timestamp: location.timestamp,
-          };
+      if (!isMounted || hasStoppedRef.current) return;
 
-          const nextBuffer = updatePaceBuffer(pacePoints.current, newPoint);
-          const didAcceptPoint =
-            nextBuffer.points[nextBuffer.points.length - 1]?.timestamp ===
-            newPoint.timestamp;
+      let sub: Location.LocationSubscription;
 
-          pacePoints.current = nextBuffer.points;
-
-          if (didAcceptPoint) {
-            if (firstAcceptedAt.current == null) {
-              firstAcceptedAt.current = newPoint.timestamp;
+      try {
+        sub = await Location.watchPositionAsync(
+          {
+            accuracy: Location.Accuracy.High,
+            timeInterval: 1000,
+          },
+          processRunLocation,
+          (reason) => {
+            if (isMounted) {
+              setErrorMsg(`Location tracking error: ${reason}`);
             }
-
-            acceptedSampleCount.current += 1;
           }
-
-          if (nextBuffer.wasRejectedAsSpike) {
-            lastRejectedAt.current = newPoint.timestamp;
-          }
-
-          if (nextBuffer.acceptedDistanceMetres > 0) {
-            totalMetres.current += nextBuffer.acceptedDistanceMetres;
-          }
-
-          // Stage 1: fast internal pace.
-          const rawInternalPace = calculateInternalPaceMinPerKm(pacePoints.current);
-          internalPace.current = smoothInternalPaceMinPerKm(
-            internalPace.current,
-            rawInternalPace
-          );
-
-          // Stage 2: stable display pace, only updated when calibration and
-          // confidence checks say the current signal is trustworthy enough.
-          const windowStats = getPaceWindowStats(pacePoints.current);
-          const trackingElapsedMs =
-            firstAcceptedAt.current == null
-              ? 0
-              : newPoint.timestamp - firstAcceptedAt.current;
-          const isCalibrated = isPaceCalibrated({
-            elapsedMs: trackingElapsedMs,
-            acceptedDistanceMetres: totalMetres.current,
-            acceptedSampleCount: acceptedSampleCount.current,
-          });
-          const hasConfidence =
-            isCalibrated &&
-            hasHighPaceConfidence({
-              stats: windowStats,
-              currentTimestamp: newPoint.timestamp,
-              lastRejectedAt: lastRejectedAt.current,
-            });
-
-          if (hasConfidence && internalPace.current != null) {
-            displayPace.current = updateDisplayPaceMinPerKm({
-              previousDisplayPace: displayPace.current,
-              internalPace: internalPace.current,
-              isSlowMovement: isSlowMovementSpeed(windowStats.averageSpeedMps),
-            });
-            lastStableDisplayAt.current = newPoint.timestamp;
-          } else {
-            const canHoldLastStablePace =
-              displayPace.current != null &&
-              lastStableDisplayAt.current != null &&
-              newPoint.timestamp - lastStableDisplayAt.current <= DISPLAY_PACE_HOLD_MS;
-
-            displayPace.current = canHoldLastStablePace
-              ? displayPace.current
-              : null;
-          }
-
-          if (isMounted) {
-            setDistanceKm(totalMetres.current / 1000);
-            setCurrentPaceMinPerKm(displayPace.current);
-          }
+        );
+      } catch {
+        if (isMounted) {
+          setErrorMsg("GPS tracking could not be started.");
         }
-      );
+        return;
+      }
+
+      if (!isMounted || hasStoppedRef.current) {
+        sub.remove();
+        return;
+      }
 
       subscriptionRef.current = sub;
 
       if (isMounted) {
         setIsTracking(true);
       }
+
+      startRunBackgroundLocationUpdates()
+        .then((backgroundError) => {
+          if (!isMounted || hasStoppedRef.current) {
+            stopRunBackgroundLocationUpdates().catch(() => {
+              // Cleanup is best effort if the screen disappeared mid-start.
+            });
+            return;
+          }
+
+          if (isMounted) {
+            setBackgroundErrorMsg(backgroundError);
+          }
+        })
+        .catch(() => {
+          if (isMounted) {
+            setBackgroundErrorMsg(
+              "Background GPS could not be started; foreground GPS is still active."
+            );
+          }
+        });
     }
 
     startTracking();
 
     return () => {
       isMounted = false;
+      unsubscribe();
+      appStateSubscription.remove();
 
-      if (subscriptionRef.current) {
-        subscriptionRef.current.remove();
+      if (!hasStoppedRef.current) {
+        hasStoppedRef.current = true;
+
+        if (subscriptionRef.current) {
+          subscriptionRef.current.remove();
+          subscriptionRef.current = null;
+        }
+
+        stopRunBackgroundLocationUpdates().catch(() => {
+          // Cleanup is best effort during unmount.
+        });
+        recordRunEnteredForeground();
       }
     };
-  }, []);
+  }, [setLocationAppState, stopTracking]);
 
-  return { distanceKm, currentPaceMinPerKm, isTracking, errorMsg };
+  return {
+    distanceKm,
+    currentPaceMinPerKm,
+    isTracking,
+    errorMsg,
+    backgroundErrorMsg,
+    diagnostics,
+    stopTracking,
+  };
 }

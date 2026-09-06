@@ -24,6 +24,12 @@ export const PACE_WINDOW_MS = 6_000;
 /** Ignore jumps above this speed. 6 m/s is about 2:47 /km. */
 export const MAX_REASONABLE_SPEED_MPS = 6;
 
+/** Ignore samples when the platform reports clearly poor GPS accuracy. */
+export const MAX_ACCEPTABLE_ACCURACY_METRES = 35;
+
+/** Do not connect points across long gaps in location updates. */
+export const MAX_SAMPLE_GAP_MS = 10_000;
+
 /** Tiny movements are usually GPS wobble, especially when stationary. */
 export const MIN_MOVEMENT_METRES = 1.2;
 
@@ -69,12 +75,16 @@ export const DISPLAY_PACE_ALPHA_RUNNING = 0.32;
 export const DISPLAY_MAX_STEP_SLOW_MIN_PER_KM = 0.45;
 export const DISPLAY_MAX_STEP_RUNNING_MIN_PER_KM = 0.9;
 
+/** Keep the displayed pace briefly during confidence dips after calibration. */
+export const DISPLAY_PACE_CONFIDENCE_HOLD_MS = 12_000;
+
 // ─── Types ───────────────────────────────────────────────────────────────────
 
 export interface PacePoint {
   latitude: number;
   longitude: number;
   timestamp: number;
+  accuracyMetres?: number | null;
 }
 
 export interface PaceWindowStats {
@@ -145,7 +155,22 @@ export function updatePaceBuffer(
   points: PacePoint[];
   acceptedDistanceMetres: number;
   wasRejectedAsSpike: boolean;
+  wasRejectedForAccuracy: boolean;
+  wasResetForGap: boolean;
 } {
+  if (
+    newPoint.accuracyMetres != null &&
+    newPoint.accuracyMetres > MAX_ACCEPTABLE_ACCURACY_METRES
+  ) {
+    return {
+      points: previousPoints,
+      acceptedDistanceMetres: 0,
+      wasRejectedAsSpike: false,
+      wasRejectedForAccuracy: true,
+      wasResetForGap: false,
+    };
+  }
+
   const lastPoint = previousPoints[previousPoints.length - 1];
 
   if (!lastPoint) {
@@ -153,16 +178,30 @@ export function updatePaceBuffer(
       points: [newPoint],
       acceptedDistanceMetres: 0,
       wasRejectedAsSpike: false,
+      wasRejectedForAccuracy: false,
+      wasResetForGap: false,
     };
   }
 
   const segment = getSegmentMetrics(lastPoint, newPoint);
+
+  if (segment.elapsedMs > MAX_SAMPLE_GAP_MS) {
+    return {
+      points: [newPoint],
+      acceptedDistanceMetres: 0,
+      wasRejectedAsSpike: false,
+      wasRejectedForAccuracy: false,
+      wasResetForGap: true,
+    };
+  }
 
   if (segment.elapsedMs <= 0 || segment.speedMps > MAX_REASONABLE_SPEED_MPS) {
     return {
       points: previousPoints,
       acceptedDistanceMetres: 0,
       wasRejectedAsSpike: true,
+      wasRejectedForAccuracy: false,
+      wasResetForGap: false,
     };
   }
 
@@ -174,6 +213,8 @@ export function updatePaceBuffer(
     points,
     acceptedDistanceMetres: segment.distanceMetres,
     wasRejectedAsSpike: false,
+    wasRejectedForAccuracy: false,
+    wasResetForGap: false,
   };
 }
 
@@ -389,4 +430,25 @@ export function updateDisplayPaceMinPerKm(params: {
     alpha * internalPace + (1 - alpha) * previousDisplayPace;
 
   return clampPaceStep(previousDisplayPace, smoothedTarget, maxStep);
+}
+
+export function shouldHoldDisplayPace(params: {
+  displayPace: number | null;
+  lastStableDisplayAt: number | null;
+  currentTimestamp: number;
+  wasResetForGap: boolean;
+}): boolean {
+  const {
+    displayPace,
+    lastStableDisplayAt,
+    currentTimestamp,
+    wasResetForGap,
+  } = params;
+
+  return (
+    !wasResetForGap &&
+    displayPace != null &&
+    lastStableDisplayAt != null &&
+    currentTimestamp - lastStableDisplayAt <= DISPLAY_PACE_CONFIDENCE_HOLD_MS
+  );
 }
