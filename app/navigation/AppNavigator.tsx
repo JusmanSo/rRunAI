@@ -9,6 +9,7 @@ import SummaryScreen from "../screens/SummaryScreen";
 // Import the Session type so we can include it in navigation params.
 import type { Session } from "../types/session";
 import type { RunLocationDiagnostics } from "../services/runGpsDiagnostics";
+import type { Rpe } from "../types/runFeedback";
 
 /**
  * Central type definition for all screens and their params.
@@ -27,6 +28,8 @@ export type RootStackParamList = {
     distanceKm: number;
     session: Session;
     diagnostics?: RunLocationDiagnostics;
+    /** Current-run feedback only; discarded when Summary is left. */
+    rpe?: Rpe | null;
   };
 };
 

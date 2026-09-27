@@ -32,6 +32,8 @@ import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import type { RootStackParamList } from "../navigation/AppNavigator";
 import type { BlockType } from "../types/session";
 import type { RunLocationDiagnostics } from "../services/runGpsDiagnostics";
+import { RPE_VALUES } from "../types/runFeedback";
+import { normalizeRpe } from "../utils/runFeedback";
 
 // Shared formatting helpers
 import { formatTime, formatPace } from "../utils/formatters";
@@ -41,6 +43,7 @@ type Props = NativeStackScreenProps<RootStackParamList, "Summary">;
 export default function SummaryScreen({ route, navigation }: Props) {
   const { elapsedSeconds, distanceKm, session, diagnostics } = route.params;
   const isStructuredWorkout = session.blocks.length > 0;
+  const rpe = normalizeRpe(route.params.rpe);
 
   // ── Calculate the total planned duration from all blocks ────────────
   // This lets the runner see if they ran the full plan or ended early.
@@ -113,10 +116,45 @@ export default function SummaryScreen({ route, navigation }: Props) {
         <GpsDiagnosticsSection diagnostics={diagnostics} />
       )}
 
-      {/* ── RPE placeholder ─────────────────────────────────────────── */}
+      {/* ── Optional feedback for this run ──────────────────────────── */}
       <View style={styles.rpeSection}>
         <Text style={styles.rpeTitle}>How did it feel?</Text>
-        <Text style={styles.rpePlaceholder}>RPE input coming soon</Text>
+        <Text style={styles.rpeDescription}>
+          Rate your perceived effort (RPE) for the whole run. Optional.
+        </Text>
+        <Text style={styles.rpeDescription}>1 = Very easy · 10 = Maximal effort</Text>
+        <View style={styles.rpeOptions}>
+          {RPE_VALUES.map((value) => (
+            <TouchableOpacity
+              key={value}
+              style={[styles.rpeOption, rpe === value && styles.rpeOptionSelected]}
+              onPress={() => navigation.setParams({ rpe: value })}
+              accessibilityRole="radio"
+              accessibilityLabel={`Effort ${value} out of 10`}
+              accessibilityState={{ checked: rpe === value }}
+              activeOpacity={0.8}
+            >
+              <Text style={[styles.rpeOptionText, rpe === value && styles.rpeOptionTextSelected]}>
+                {value}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+        <Text style={styles.rpeDescription} accessibilityLiveRegion="polite">
+          {rpe === null ? "No effort rating selected" : `Selected effort: ${rpe}/10`}
+        </Text>
+        {rpe !== null && (
+          <TouchableOpacity
+            onPress={() => navigation.setParams({ rpe: null })}
+            accessibilityRole="button"
+            style={styles.rpeClear}
+          >
+            <Text style={styles.rpeDescription}>Clear rating</Text>
+          </TouchableOpacity>
+        )}
+        <Text style={styles.rpeDescription}>
+          This rating is only kept while this summary is open.
+        </Text>
       </View>
 
       {/* ── Return to Home ──────────────────────────────────────────── */}
@@ -364,6 +402,7 @@ const styles = StyleSheet.create({
 
   // ── RPE ─────────────────────────────────────────────────────────────
   rpeSection: {
+    width: "100%",
     alignItems: "center",
     marginBottom: 32,
   },
@@ -373,10 +412,46 @@ const styles = StyleSheet.create({
     color: "#FFFFFF",
     marginBottom: 8,
   },
-  rpePlaceholder: {
+  rpeDescription: {
     fontSize: 14,
-    color: "#666666",
-    fontStyle: "italic",
+    color: "#AAAAAA",
+    textAlign: "center",
+    marginBottom: 8,
+  },
+  rpeOptions: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    justifyContent: "center",
+    gap: 8,
+    marginVertical: 12,
+  },
+  rpeOption: {
+    minWidth: 48,
+    minHeight: 48,
+    padding: 12,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 12,
+    backgroundColor: "#1A1A1A",
+    borderWidth: 1,
+    borderColor: "#555555",
+  },
+  rpeOptionSelected: {
+    backgroundColor: "#00E676",
+    borderColor: "#00E676",
+  },
+  rpeOptionText: {
+    fontSize: 18,
+    fontWeight: "700",
+    color: "#FFFFFF",
+  },
+  rpeOptionTextSelected: {
+    color: "#0D0D0D",
+  },
+  rpeClear: {
+    minHeight: 48,
+    justifyContent: "center",
+    paddingHorizontal: 16,
   },
 
   // ── Button ──────────────────────────────────────────────────────────
